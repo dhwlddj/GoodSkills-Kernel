@@ -250,15 +250,26 @@ sio_latter_request(struct request_queue *q, struct request *rq)
 	return list_entry(rq->queuelist.next, struct request, queuelist);
 }
 
-static void *
-sio_init_queue(struct request_queue *q)
+static int sioplus_init_queue(struct request_queue *q, struct elevator_type *e)
 {
 	struct sio_data *sd;
+    struct elevator_queue *eq;
 
-	/* Allocate structure */
+	eq = elevator_alloc(q, e);
+	if (!eq)
+		return -ENOMEM;
+
+    /* Allocate structure */
 	sd = kmalloc_node(sizeof(*sd), GFP_KERNEL, q->node);
-	if (!sd)
-		return NULL;
+	if (!sd) {
+		kobject_put(&eq->kobj);
+		return -ENOMEM;
+	}
+	eq->elevator_data = sd;
+
+	spin_lock_irq(q->queue_lock);
+	q->elevator = eq;
+	spin_unlock_irq(q->queue_lock);
 
 	/* Initialize fifo lists */
 	INIT_LIST_HEAD(&sd->fifo_list[SYNC][READ]);
@@ -275,7 +286,7 @@ sio_init_queue(struct request_queue *q)
 	sd->fifo_batch = fifo_batch;
 	sd->writes_starved = writes_starved;
 
-	return sd;
+	return 0;
 }
 
 static void
@@ -374,7 +385,7 @@ static struct elevator_type iosched_sioplus = {
 		.elevator_queue_empty_fn	= sio_queue_empty,
 		.elevator_former_req_fn		= sio_former_request,
 		.elevator_latter_req_fn		= sio_latter_request,
-		.elevator_init_fn		= sio_init_queue,
+        .elevator_init_fn	= sioplus_init_queue,
 		.elevator_exit_fn		= sio_exit_queue,
 	},
 
